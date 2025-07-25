@@ -28,9 +28,6 @@ class extends Component
     #[Validate('required|string')]
     public string $destination;
 
-    #[Validate('required|date')]
-    public string $request_date;
-
     public ?int $child_part_id = null;
     public array $partsSearchable = [];
     public array $items = [];
@@ -45,7 +42,6 @@ class extends Component
     {
         // Set default values for form inputs.
         $this->destination = $this->destinationOptions()[0]['name'] ?? '';
-        $this->request_date = now()->format('Y-m-d\TH:i');
 
         // Load any existing items from the session.
         $this->loadItemsFromSession();
@@ -157,7 +153,7 @@ class extends Component
             DB::transaction(function () use ($items) {
                 $request = InvRequest::create([
                     'requested_by' => Auth::id(),
-                    'requested_at' => Carbon::parse($this->request_date),
+                    'requested_at' => now(),
                     'destination' => $this->destination,
                     'status' => 'Pending', // Example status
                 ]);
@@ -232,7 +228,6 @@ class extends Component
         return [
             ['id' => 'Line KS', 'name' => 'Line KS'],
             ['id' => 'Line SU', 'name' => 'Line SU'],
-            ['id' => 'Gudang', 'name' => 'Gudang'],
         ];
     }
 
@@ -403,20 +398,6 @@ class extends Component
                         />
                     </div>
                     
-                    <div>
-                        <x-datetime 
-                            label="Tanggal & Waktu Permintaan" 
-                            wire:model="request_date" 
-                            type="datetime-local" 
-                            required
-                            class="input-bordered"
-                        />
-                        <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                            <x-icon name="o-clock" class="w-3 h-3 inline mr-1" />
-                            Permintaan akan diproses sesuai jadwal ini
-                        </div>
-                    </div>
-
                     <!-- Quick Stats -->
                     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
                         <div class="flex items-center justify-between text-sm">
@@ -583,7 +564,7 @@ class extends Component
                         <div class="mt-2 space-y-1 text-sm text-blue-800 dark:text-blue-200">
                             <div>• <strong>{{ count($items) }} jenis part</strong> dengan total <strong>{{ $this->totalItems() }} KBN</strong></div>
                             <div>• Tujuan: <strong>{{ $destination ?? '-' }}</strong></div>
-                            <div>• Tanggal: <strong>{{ $request_date ? \Carbon\Carbon::parse($request_date)->format('d/m/Y H:i') : '-' }}</strong></div>
+                            <div>• Tanggal: <strong>{{ now()->translatedFormat('d F Y, H:i') ?? '-' }}</strong></div>
                         </div>
                     </div>
                 </div>

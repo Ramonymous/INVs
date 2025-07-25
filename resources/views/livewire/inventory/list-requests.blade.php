@@ -7,6 +7,7 @@ use App\Notifications\RequestPushed;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 new
 #[Layout('components.layouts.app')]
@@ -15,8 +16,8 @@ class extends Component {
 
     // Data
     public Collection $rows;
-    public array $seenItemIds = [];
-    public array $seenReqIds  = [];
+    public array $seenReqIds = [];
+    public array $announcedDelayedItemIds = []; // Track items announced for delay
     public array $sortBy = ['column' => 'requested_at', 'direction' => 'asc'];
 
     /**
@@ -31,8 +32,8 @@ class extends Component {
     }
 
     /**
-     * Called every 5 s by wire:poll.
-     * Detects new items (per item) and new requests (per request).
+     * Called every 5s by wire:poll.
+     * Detects new items and items that have been waiting for over 30 minutes.
      */
     public function refreshRows(): void
     {
@@ -40,14 +41,15 @@ class extends Component {
             // Fetch the latest request items, ensuring we sort by the request date
             $freshItems = InvRequestItem::query()
                 ->with(['part', 'request.user'])
+                ->where('fulfilled', false)
                 ->whereHas('part')
                 ->whereHas('request')
                 ->join('inv_requests', 'inv_request_items.request_id', '=', 'inv_requests.id')
-                ->orderBy('inv_requests.requested_at', 'asc') // Sort by request time descending
+                ->orderBy('inv_requests.requested_at', 'asc') // Sort by request time ascending
                 ->limit(50)
                 ->get();
 
-            // --- 1.  Detect completely new requests ---
+            // --- 1.  Detect completely new requests for immediate announcement ---
             $newRequestIds = $freshItems
                 ->pluck('request_id')
                 ->unique()
@@ -55,32 +57,51 @@ class extends Component {
                 ->values()
                 ->toArray();
 
-            // --- 2.  Collect every part number in those new requests ---
-            $partNumbersToSpeak = $freshItems
+            // --- 2.  Collect part numbers from NEW requests for immediate speech ---
+            $partNumbersToSpeakImmediately = $freshItems
                 ->filter(fn ($item) => in_array($item->request_id, $newRequestIds))
                 ->pluck('part.part_number')
                 ->toArray();
 
-            // --- 3.  Mark these requests & items as seen ---
-            foreach ($freshItems as $item) {
-                $this->seenItemIds[] = $item->id;
-                if (!in_array($item->request_id, $this->seenReqIds)) {
-                    $this->seenReqIds[] = $item->request_id;
-                }
+            // --- 3. Detect DELAYED items (older than 30 mins, not in a new request, and not yet announced) ---
+            $thirtyMinutesAgo = Carbon::now()->subMinutes(30);
+            $partNumbersToSpeakDelayed = $freshItems
+                ->filter(function ($item) use ($newRequestIds, $thirtyMinutesAgo) {
+                    // Condition 1: Not part of a brand new request
+                    return !in_array($item->request_id, $newRequestIds)
+                        // Condition 2: Requested more than 30 minutes ago
+                        && $item->request->requested_at->lt($thirtyMinutesAgo)
+                        // Condition 3: Not already announced as delayed
+                        && !in_array($item->id, $this->announcedDelayedItemIds);
+                })
+                ->map(function ($item) {
+                    // Mark as announced to prevent re-announcing on the next poll
+                    $this->announcedDelayedItemIds[] = $item->id;
+                    return $item->part->part_number;
+                })
+                ->values()
+                ->toArray();
+
+            // --- 4. Mark new requests as seen ---
+            if (!empty($newRequestIds)) {
+                $this->seenReqIds = array_unique(array_merge($this->seenReqIds, $newRequestIds));
             }
 
-            // --- 4.  Speak all part numbers in the new requests ---
-            if ($partNumbersToSpeak) {
-                $this->dispatch('speak-part-numbers', part_numbers: $partNumbersToSpeak);
+            // --- 5. Dispatch speech events ---
+            if ($partNumbersToSpeakImmediately) {
+                $this->dispatch('speak-part-numbers', part_numbers: $partNumbersToSpeakImmediately);
+            }
+            if ($partNumbersToSpeakDelayed) {
+                $this->dispatch('speak-delayed-part-numbers', part_numbers: $partNumbersToSpeakDelayed);
             }
 
-            // --- 5.  Push notification once per new request ---
+            // --- 6.  Push notification once per new request ---
             foreach ($newRequestIds as $reqId) {
                 try {
                     $request = $freshItems->firstWhere('request_id', $reqId)?->request;
                     if ($request && $request->user) {
                         $itemCount = $request->items->count();
-                        $url = url('/requests');
+                        $url = url('/inventory/list-requests');
                         $notificationId = (string) Str::uuid();
 
                         $request->user->notify(new RequestPushed($notificationId, $itemCount, $url));
@@ -90,13 +111,13 @@ class extends Component {
                 }
             }
 
-            // --- 6.  Build rows for the table ---
+            // --- 7.  Build rows for the table ---
             $this->rows = $freshItems->map(fn ($item) => [
                 'item_id'          => $item->id,
                 'request_id'       => $item->request_id,
                 'part_number'      => $item->part->part_number,
                 'requested_at'     => $item->request->requested_at->diffForHumans(), // Format for humans
-                'destination'      => $item->request->destination,                  // Add destination
+                'destination'      => $item->request->destination,                      // Add destination
                 'request_quantity' => $item->quantity,
                 'request_uom'      => 'KBN',
                 'status'           => $item->fulfilled ? 'close' : 'waiting',
@@ -121,11 +142,7 @@ class extends Component {
 <div wire:poll.5s="refreshRows">
     <x-header title="Real-time Part Requests" separator progress-indicator>
         <x-slot:middle class="!justify-end">
-            @if(auth()->user()->pushSubscriptions()->exists())
-                <span class="badge badge-success">Push ON</span>
-            @else
-                <span class="badge badge-secondary">Push OFF</span>
-            @endif
+            <x-button class="btn-sm" icon="o-speaker-wave" label="Inisialisasi Suara" @click="initializeSpeech()" />
         </x-slot:middle>
     </x-header>
 
@@ -142,7 +159,13 @@ class extends Component {
             :rows="$rows"
             wire:key="requests-table-{{ now() }}"
         >
-            {{-- Highlight new rows --}}
+            @scope('cell_status', $row)
+                <div class="inline-grid *:[grid-area:1/1]">
+                <div class="status status-error animate-ping"></div>
+                <div class="status status-error"></div>
+                </div> {{ Str::upper($row['status']) }}
+            @endscope
+
             @scope('row-decoration', $row)
                 @if($row['is_new'])
                     <div class="bg-yellow-200/50 dark:bg-yellow-500/20 absolute inset-0 -z-10 animate-pulse"></div>
@@ -154,89 +177,105 @@ class extends Component {
 
 @push('footer')
 <script>
-    document.addEventListener('livewire:init', () => {
-        // ... (kode notifikasi desktop tetap sama) ...
-        Livewire.on('notify-browser', ({ title, body }) => {
-            // ...
-        });
+let indonesianVoice = null;
+const speechQueue = [];
+let isSpeaking = false;
+let initialized = false;
 
-        // ---------- Speech Synthesis with Logging ----------
-        console.log("🎤 Speech synthesis script initialized.");
-        let indonesianVoice = null;
-        const speechQueue   = [];
-        let isSpeaking      = false;
+function processSpeechQueue() {
+    if (isSpeaking || speechQueue.length === 0) return;
 
-        function setIndonesianVoice() {
-            const voices = speechSynthesis.getVoices();
-            indonesianVoice = voices.find(v => v.lang.startsWith('id')) || voices.find(v => v.lang.startsWith('en'));
-            if (indonesianVoice) {
-                console.log("🗣️ Indonesian voice selected:", indonesianVoice.name);
-            } else {
-                indonesianVoice = voices[0]; // Fallback to the first available voice
-                console.warn("⚠️ Indonesian voice (id-ID) not found. Using default:", indonesianVoice?.name);
-            }
+    isSpeaking = true;
+    const utterance = speechQueue.shift();
+
+    utterance.onend = () => {
+        isSpeaking = false;
+        setTimeout(processSpeechQueue, 200);
+    };
+
+    utterance.onerror = (e) => {
+        console.error("❌ Error saat menyuarakan:", utterance.text, e);
+        isSpeaking = false;
+        setTimeout(processSpeechQueue, 200);
+    };
+
+    speechSynthesis.speak(utterance);
+}
+
+function initializeSpeech() {
+    if (initialized) {
+        alert("✅ Suara sudah aktif.");
+        return;
+    }
+    initialized = true;
+
+    if (!('speechSynthesis' in window)) {
+        alert("❌ Browser tidak mendukung speech synthesis.");
+        return;
+    }
+
+    function setVoiceAndListen() {
+        const voices = speechSynthesis.getVoices();
+        indonesianVoice = voices.find(v => v.lang.startsWith('id')) || voices.find(v => v.lang.startsWith('en'));
+
+        if (!indonesianVoice && voices.length > 0) {
+            indonesianVoice = voices[0];
         }
 
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = setIndonesianVoice;
-        } else {
-            setIndonesianVoice();
+        if (!indonesianVoice) {
+            alert("⚠️ Tidak ada suara tersedia.");
+            return;
         }
 
-        function processSpeechQueue() {
-            if (isSpeaking) {
-                console.log("🔵 Queue processor is waiting because another utterance is in progress.");
-                return;
-            }
-            if (speechQueue.length === 0) {
-                console.log("✅ Queue is empty. Processor is idle.");
-                return;
-            }
+        console.log("🗣️ Voice ready:", indonesianVoice.name);
 
-            isSpeaking = true;
-            const utterance = speechQueue.shift();
-            // console.info(`▶️ Speaking now: "${utterance.text}"`);
-
-            utterance.onend = () => {
-                // console.log(`✔️ Finished speaking: "${utterance.text}"`);
-                isSpeaking = false;
-                setTimeout(processSpeechQueue, 200); // Process next item after a short delay
-            };
-
-            utterance.onerror = (event) => {
-                console.error(`❌ Speech synthesis error for "${utterance.text}":`, event.error);
-                isSpeaking = false;
-                setTimeout(processSpeechQueue, 200); // Try to process the next item anyway
-            };
-
-            speechSynthesis.speak(utterance);
-        }
-
+        // Listener for new part requests
         Livewire.on('speak-part-numbers', ({ part_numbers }) => {
-            console.log("🎧 Event 'speak-part-numbers' received with data:", part_numbers);
-
-            if (!('speechSynthesis' in window)) {
-                console.error("❌ Speech synthesis is not supported in this browser.");
-                return;
-            }
             if (!part_numbers?.length) {
-                console.warn("⚠️ Event received but no part numbers to speak.");
+                console.warn("⚠️ Tidak ada part number baru yang dikirim.");
                 return;
             }
-
-            setIndonesianVoice(); // Ensure voice is ready
 
             part_numbers.forEach(pn => {
-                const text = `Part baru diminta: ${pn}`;
+                const text = `Part baru diminta: ${pn.split('').join(' ')}`; // Spell out the part number
                 const u = new SpeechSynthesisUtterance(text);
                 u.lang = 'id-ID';
                 u.voice = indonesianVoice;
                 speechQueue.push(u);
-                console.log(`🔵 Queued: "${text}"`);
+                console.log(`🔵 Queued New: "${text}"`);
             });
 
             processSpeechQueue();
         });
-    });
+
+        // Listener for delayed part requests
+        Livewire.on('speak-delayed-part-numbers', ({ part_numbers }) => {
+            if (!part_numbers?.length) {
+                console.warn("⚠️ Tidak ada part number tertunda yang dikirim.");
+                return;
+            }
+
+            part_numbers.forEach(pn => {
+                const text = `Keterlambatan suplai untuk part: ${pn.split('').join(' ')}`; // Spell out the part number
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = 'id-ID';
+                u.voice = indonesianVoice;
+                speechQueue.push(u);
+                console.log(`🟠 Queued Delayed: "${text}"`);
+            });
+
+            processSpeechQueue();
+        });
+
+
+        alert("✅ Suara berhasil diaktifkan.");
+    }
+
+    if (speechSynthesis.getVoices().length > 0) {
+        setVoiceAndListen();
+    } else {
+        speechSynthesis.onvoiceschanged = setVoiceAndListen;
+    }
+}
 </script>
 @endpush

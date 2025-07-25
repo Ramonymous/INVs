@@ -54,24 +54,23 @@ class InvRequest extends Model
 
     public function getTotalRequestedQtyAttribute(): int|float
     {
-        // Use the loaded attribute if it exists, otherwise calculate it.
         return $this->total_requested_qty ?? $this->items->sum('quantity');
     }
 
     public function getTotalIssuedQtyAttribute(): int|float
     {
-        // Use the loaded attribute if it exists, otherwise calculate it.
         return $this->total_issued_qty ?? $this->issuances()->sum('issued_quantity');
     }
+
     public function getIssuanceStatusAttribute(): string
     {
         $requested = $this->total_requested_qty;
-        $issued    = $this->total_issued_qty;
+        $issued = $this->total_issued_qty;
 
         return match (true) {
-            $issued <= 0           => 'pending',
-            $issued >= $requested  => 'fully issued',
-            default                => 'partially issued',
+            $issued <= 0 => 'pending',
+            $issued >= $requested => 'fully issued',
+            default => 'partially issued',
         };
     }
 
@@ -81,5 +80,28 @@ class InvRequest extends Model
     {
         return $query->withSum('items as total_requested_qty', 'quantity')
                      ->withSum('issuances as total_issued_qty', 'issued_quantity');
+    }
+
+    public function scopeWhereStatus(Builder $query, string $status): Builder
+    {
+        return $query->withStatus()->where(function ($q) use ($status) {
+            switch ($status) {
+                case 'pending':
+                    $q->where(function ($subQuery) {
+                        $subQuery->whereDoesntHave('issuances')
+                                 ->orWhereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) <= 0');
+                    });
+                    break;
+                case 'fully issued':
+                    $q->whereHas('issuances')
+                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) >= (select sum(quantity) from inv_request_items where inv_request_items.request_id = inv_requests.id and inv_request_items.deleted_at is null)');
+                    break;
+                case 'partially issued':
+                    $q->whereHas('issuances')
+                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) > 0')
+                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) < (select sum(quantity) from inv_request_items where inv_request_items.request_id = inv_requests.id and inv_request_items.deleted_at is null)');
+                    break;
+            }
+        });
     }
 }

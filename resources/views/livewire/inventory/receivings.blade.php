@@ -33,8 +33,8 @@ class extends Component {
     public int $child_part_id = 0;
     public array $partsSearchable = [];
 
-    #[Validate('nullable|integer|min:1')]
-    public ?int $quantity = null;
+    #[Validate('required|int|min:1')]
+    public ?int $quantity = 1;
 
     /* ---------- ITEM BASKET ---------- */
     public array $items = [];
@@ -229,11 +229,11 @@ class extends Component {
                                searchable single/>
                 </div>
                 <div class="md:col-span-3">
-                    <x-input label="Jumlah" type="number" min="1" wire:model.live="quantity"/>
+                    <x-input label="Jumlah" type="number" min="1" wire:model.defer="quantity"/>
                 </div>
                 <div class="md:col-span-2">
                     <x-button wire:click="addItem" icon="o-plus" class="btn-primary w-full"
-                        :disabled="!$child_part_id || !$quantity || $quantity < 1"
+                        :disabled="!$child_part_id"
                         wire:loading.attr="disabled">
                         <span wire:loading.remove wire:target="addItem">Tambah</span>
                         <span wire:loading wire:target="addItem">Menambahkan...</span>

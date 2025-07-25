@@ -13,6 +13,7 @@ Route::middleware('auth')->group(function () {
     Volt::route('/manage/childparts', 'admin.childparts')->name('admin.childparts');
 
     // Inventory Route
+    Volt::route('/inventory/dashboard', 'inventory.dashboard')->name('inventory.dashboard');
     Volt::route('/inventory/receivings', 'inventory.receivings')->name('inventory.receivings');
     Volt::route('/inventory/requests', 'inventory.requests')->name('inventory.requests');
     Volt::route('/inventory/list-requests', 'inventory.list-requests')->name('inventory.list-requests');
