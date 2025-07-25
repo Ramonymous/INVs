@@ -11,11 +11,7 @@
     <x-menu-item title="Dashboard" icon="o-sparkles" link="###"/>
     <x-menu-item title="List Request" icon="o-list-bullet" link="{{ route('inventory.list-requests') }}" route="inventory.list-requests"/>
     <x-menu-item title="Request" icon="o-list-bullet" link="{{ route('inventory.requests') }}" route="inventory.requests"/>
-    @can('incoming|manageAny')
     <x-menu-item title="Receiving" icon="o-plus-circle" link="{{ route('inventory.receivings') }}" route="inventory.receivings"/>
-    @endcan
-    @can('outgoing|manageAny')
     <x-menu-item title="Supply" icon="o-minus-circle" link="###"/>
-    @endcan
 </x-menu-sub>
 @endrole
