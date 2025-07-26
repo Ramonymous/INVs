@@ -17,6 +17,8 @@ return new class extends Migration
             $table->string('part_name')->nullable();
             $table->string('model')->nullable();
             $table->string('variant')->nullable();
+            $table->enum('type', ['draft', 'small', 'medium', 'big'])->default('draft');
+            $table->integer('stock')->default(0);
             $table->string('homeline')->nullable();
             $table->string('address')->nullable();
             $table->timestamps();

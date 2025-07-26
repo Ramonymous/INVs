@@ -15,7 +15,8 @@ return new class extends Migration
             $table->id();
 
             // Referensi ke request
-            $table->foreignId('request_id')->constrained('inv_requests')->cascadeOnDelete();
+            $table->foreignId('request_id')->nullable()->constrained('inv_requests')->cascadeOnDelete();
+            $table->foreignId('request_item_id')->nullable()->constrained('inv_request_items')->nullOnDelete();
 
             // Referensi ke item penerimaan (kode QR)
             $table->foreignId('receipt_item_id')->constrained('inv_receipt_items')->cascadeOnDelete();

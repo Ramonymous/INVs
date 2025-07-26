@@ -170,6 +170,7 @@ class extends Component {
                         'receipt_id' => $rcpt->id,
                         'child_part_id' => $item['child_part_id'],
                         'quantity' => $item['quantity'],
+                        'available' => $item['quantity'],
                         'code' => $this->generateItemCode($rcpt->id, $i),
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -177,6 +178,11 @@ class extends Component {
                 })->toArray();
 
                 InvReceiptItem::insert($itemsToInsert);
+
+                foreach ($this->items as $item) {
+                    MasterChildpart::where('id', $item['child_part_id'])->increment('stock', $item['quantity']);
+                }
+
                 $this->freshItemIds = InvReceiptItem::where('receipt_id', $rcpt->id)
                     ->pluck('id')
                     ->toArray();

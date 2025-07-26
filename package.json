@@ -11,13 +11,12 @@
         "axios": "^1.8.2",
         "concurrently": "^9.0.1",
         "daisyui": "^5.0.46",
-        "laravel-vite-plugin": "^1.2.0",
+        "laravel-vite-plugin": "^2.0.0",
         "tailwindcss": "^4.1.11",
-        "vite": "^6.2.4"
+        "vite": "^7.0.4"
     },
     "dependencies": {
         "chart.js": "^4.5.0",
-        "html5-qrcode": "^2.3.8",
         "jsqr": "^1.4.0",
         "puppeteer": "^24.14.0"
     }

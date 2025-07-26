@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
     build: {
         outDir: 'public/build',
-        manifest: true, // ✅ Wajib di sini
+        manifest: true,
         cssCodeSplit: true,
         sourcemap: false,
         minify: 'esbuild',
@@ -24,6 +24,7 @@ export default defineConfig({
                 'resources/js/app.js',
             ],
             refresh: true,
+            buildDirectory: 'build',
         }),
         tailwindcss(),
     ],

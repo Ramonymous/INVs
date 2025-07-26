@@ -30,6 +30,7 @@ class InvIssuance extends Model
     /** @var list<string> */
     protected $fillable = [
         'request_id',
+        'request_item_id',
         'receipt_item_id',
         'issued_quantity',
         'issued_by',
@@ -74,4 +75,10 @@ class InvIssuance extends Model
     {
         return $query->whereHas('receiptItem', fn ($q) => $q->where('child_part_id', $partId));
     }
+
+    public function requestItem(): BelongsTo
+    {
+        return $this->belongsTo(InvRequestItem::class, 'request_item_id');
+    }
+
 }

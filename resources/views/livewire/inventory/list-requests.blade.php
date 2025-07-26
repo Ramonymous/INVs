@@ -3,7 +3,6 @@
 use Livewire\Volt\Component;
 use App\Models\InvRequestItem;
 use App\Models\InvRequest;
-use App\Notifications\RequestPushed;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -93,22 +92,6 @@ class extends Component {
             }
             if ($partNumbersToSpeakDelayed) {
                 $this->dispatch('speak-delayed-part-numbers', part_numbers: $partNumbersToSpeakDelayed);
-            }
-
-            // --- 6.  Push notification once per new request ---
-            foreach ($newRequestIds as $reqId) {
-                try {
-                    $request = $freshItems->firstWhere('request_id', $reqId)?->request;
-                    if ($request && $request->user) {
-                        $itemCount = $request->items->count();
-                        $url = url('/inventory/list-requests');
-                        $notificationId = (string) Str::uuid();
-
-                        $request->user->notify(new RequestPushed($notificationId, $itemCount, $url));
-                    }
-                } catch (\Throwable $e) {
-                    Log::error('Push notification failed', ['request_id' => $reqId, 'error' => $e->getMessage()]);
-                }
             }
 
             // --- 7.  Build rows for the table ---

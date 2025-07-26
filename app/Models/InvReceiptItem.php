@@ -26,7 +26,7 @@ class InvReceiptItem extends Model
     use HasFactory, SoftDeletes;
 
     /** @var list<string> */
-    protected $fillable = ['receipt_id', 'child_part_id', 'quantity', 'code'];
+    protected $fillable = ['receipt_id', 'child_part_id', 'available', 'quantity', 'code'];
 
     /* ---------------- Relations ---------------- */
 

@@ -48,7 +48,9 @@ class extends Component {
         <x-input placeholder="Password" wire:model="password" type="password" icon="o-key" />
  
         <x-slot:actions>
-            <x-button label="Create an account" class="btn-ghost" link="/register" />
+            @if(Route::has('register'))
+                <x-button label="Create an account" class="btn-ghost" link="{{ route('register') }}" />
+            @endif
             <x-button label="Login" type="submit" icon="o-paper-airplane" class="btn-primary" spinner="login" />
         </x-slot:actions>
     </x-form>

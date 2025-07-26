@@ -4,14 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta name="vapid-public-key" content="{{ config('webpush.vapid.public_key') }}">
     <title>{{ isset($title) ? $title.' - '.config('app.name') : config('app.name') }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('header')
 </head>
 <body class="min-h-screen font-sans antialiased bg-base-200">
 
-    {{-- NAVBAR mobile only --}}
     <x-nav sticky class="lg:hidden">
         <x-slot:brand>
             <x-app-brand />
@@ -23,21 +21,16 @@
         </x-slot:actions>
     </x-nav>
 
-    {{-- MAIN --}}
     <x-main>
-        {{-- SIDEBAR --}}
         <x-slot:sidebar drawer="main-drawer" collapsible class="bg-base-100 lg:bg-inherit">
 
-            {{-- BRAND --}}
             <x-app-brand class="px-5 pt-4" />
 
-            {{-- MENU --}}
             <x-menu activate-by-route>
                 <x-menu-separator />
                 
                 <x-partials.menu />
 
-                {{-- User --}}
                 @if($user = auth()->user())
                     <x-menu-separator />
 
@@ -56,32 +49,14 @@
             </x-menu>
         </x-slot:sidebar>
 
-        {{-- The `$slot` goes here --}}
         <x-slot:content>
             {{ $slot }}
         </x-slot:content>
     </x-main>
 
-    {{--  TOAST area --}}
     <x-toast />
 
-    {{-- This stack is for scripts pushed from specific pages (like the dashboard) --}}
     @stack('footer')     
 
-    {{-- NEW: Service Worker Registration Script --}}
-    <script>
-        // This script will run on every page to register the service worker.
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(registration => {
-                        console.log('Service Worker registered successfully with scope: ', registration.scope);
-                    })
-                    .catch(error => {
-                        console.error('Service Worker registration failed: ', error);
-                    });
-            });
-        }
-    </script>
 </body>
 </html>

@@ -32,6 +32,8 @@ class MasterChildpart extends Model
         'variant',
         'homeline',
         'address',
+        'type',
+        'stock',
     ];
 
     /* ---------------- Relations ---------------- */

@@ -5,7 +5,7 @@ use Livewire\Volt\Volt;
 
 // Authentication Routes
 Volt::route('/login', 'login')->name('login');
-Volt::route('/register', 'register')->name('register');
+// Volt::route('/register', 'register')->name('register');
 
 Route::get('/logout', function () {
     auth()->logout();

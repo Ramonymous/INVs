@@ -17,6 +17,7 @@ return new class extends Migration
             $table->foreignId('receipt_id')->constrained('inv_receipts')->cascadeOnDelete();
             $table->foreignId('child_part_id')->constrained('master_childparts')->cascadeOnDelete();
             $table->integer('quantity');
+            $table->integer('available');
             $table->string('code')->unique(); // <- QR code
             $table->timestamps();
             $table->softDeletes(); // ← tambah juga
