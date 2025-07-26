@@ -62,13 +62,6 @@ class InvIssuance extends Model
         return $this->belongsTo(User::class, 'issued_by');
     }
 
-    /* ---------------- Accessors ---------------- */
-
-    public function getChildPartAttribute(): ?MasterChildpart
-    {
-        return $this->receiptItem?->part;
-    }
-
     /* ---------------- Scopes ---------------- */
 
     public function scopeForPart(Builder $query, int $partId): Builder

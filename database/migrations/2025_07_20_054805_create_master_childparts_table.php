@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::create('master_childparts', function (Blueprint $table) {
             $table->id();
             $table->string('part_number')->unique();
+            $table->index('part_number');
             $table->string('part_name')->nullable();
             $table->string('model')->nullable();
             $table->string('variant')->nullable();

@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\MasterChildpart;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Rule;
@@ -26,6 +28,9 @@ class extends Component {
     public string $filter_part_number = '';
     public string $filter_model = '';
     public string $filter_variant = '';
+    public string $filter_type = '';
+    public string $filter_homeline = '';
+
 
     // Form
     public ?int $edit_id = null;
@@ -34,6 +39,7 @@ class extends Component {
     public string $model = '';
     public string $variant = '';
     public string $homeline = '';
+    public string $type = '';
     public string $address = '';
 
     // Import
@@ -44,12 +50,6 @@ class extends Component {
     public array $errors = [];
     
     public int $perPage = 10;
-    public $data;
-
-    public function mount()
-    {
-        $this->data = MasterChildpart::all();
-    }
 
     // Headers definition
     public function headers(): array
@@ -60,8 +60,21 @@ class extends Component {
             ['key' => 'part_name', 'label' => 'Name', 'class' => 'w-48'],
             ['key' => 'model', 'label' => 'Model'],
             ['key' => 'variant', 'label' => 'Variant'],
+            ['key' => 'type', 'label' => 'Type'],
             ['key' => 'homeline', 'label' => 'Homeline'],
         ];
+    }
+
+    public function getStatsProperty(): array
+    {
+        return Cache::remember('childpart_stats', 60, function () {
+            return [
+                'total' => MasterChildpart::count(),
+                'models' => MasterChildpart::distinct()->count('model'),
+                'variants' => MasterChildpart::distinct()->count('variant'),
+                'homelines' => MasterChildpart::distinct()->count('homeline'),
+            ];
+        });
     }
 
     // Query with filters
@@ -70,18 +83,24 @@ class extends Component {
         return MasterChildpart::query()
             ->when($this->search, function($q) {
                 $q->where(function($query) {
-                    $query->where('part_number', 'like', "{$this->search}%")
-                        ->orWhere('part_name', 'like', "{$this->search}%");
+                    $query->where('part_number', 'like', "%{$this->search}%")
+                          ->orWhere('part_name', 'like', "%{$this->search}%");
                 });
             })
             ->when($this->filter_part_number, fn($q) => $q
-                ->where('part_number', 'like', "{$this->filter_part_number}%")
+                ->where('part_number', 'like', "%{$this->filter_part_number}%")
             )
             ->when($this->filter_model, fn($q) => $q
-                ->where('model', 'like', "{$this->filter_model}%")
+                ->where('model', 'like', "%{$this->filter_model}%")
             )
             ->when($this->filter_variant, fn($q) => $q
-                ->where('variant', 'like', "{$this->filter_variant}%")
+                ->where('variant', 'like', "%{$this->filter_variant}%")
+            )
+            ->when($this->filter_type, fn($q) => $q
+                ->where('type', 'like', "%{$this->filter_type}%")
+            )
+            ->when($this->filter_homeline, fn($q) => $q
+                ->where('homeline', 'like', "%{$this->filter_homeline}%")
             )
             ->orderBy('part_number')
             ->paginate($this->perPage);
@@ -99,20 +118,24 @@ class extends Component {
     // Actions
     public function openCreateModal(): void
     {
-        $this->reset('part_number', 'part_name', 'model', 'variant', 'homeline', 'address', 'edit_id');
+        $this->reset('part_number', 'part_name', 'model', 'variant', 'type', 'homeline', 'address', 'edit_id');
         $this->modal = true;
     }
 
     public function openEditModal(int $id): void
     {
         $childPart = MasterChildpart::findOrFail($id);
+
         $this->edit_id = $childPart->id;
         $this->part_number = $childPart->part_number;
         $this->part_name = $childPart->part_name;
-        $this->model = $childPart->model;
-        $this->variant = $childPart->variant;
-        $this->homeline = $childPart->homeline;
-        $this->address = $childPart->address;
+        
+        $this->model = $childPart->model ?? '';
+        $this->variant = $childPart->variant ?? '';
+        $this->type = $childPart->type ?? '';
+        $this->homeline = $childPart->homeline ?? '';
+        $this->address = $childPart->address ?? '';
+
         $this->modal = true;
     }
 
@@ -136,6 +159,7 @@ class extends Component {
             'part_name'   => 'required|string|max:255',
             'model'       => 'nullable|string|max:100',
             'variant'     => 'nullable|string|max:100',
+            'type'        => 'nullable|string|max:100',
             'homeline'    => 'nullable|string|max:100',
             'address'     => 'nullable|string|max:255',
         ]);
@@ -149,13 +173,12 @@ class extends Component {
         }
 
         $this->modal = false;
-        $this->reset('part_number', 'part_name', 'model', 'variant', 'homeline', 'address', 'edit_id');
     }
 
     public function importExcel(): void
     {
         $this->validate();
-        
+
         if ($this->file->extension() !== 'xlsx') {
             $this->error('Only XLSX files are allowed');
             return;
@@ -163,54 +186,66 @@ class extends Component {
 
         try {
             $spreadsheet = IOFactory::load($this->file->getRealPath());
-            $worksheet = $spreadsheet->getActiveSheet();
-            $rows = $worksheet->toArray();
-            
-            // Validate headers
-            $headers = array_map('trim', $rows[0]);
-            $expectedHeaders = ['part_number', 'part_name', 'model', 'variant', 'homeline', 'address'];
-            if (array_diff($expectedHeaders, $headers) !== []) {
+            $rows = $spreadsheet->getActiveSheet()->toArray();
+
+            $headers = array_map('trim', array_shift($rows));
+            $expectedHeaders = ['part_number', 'part_name', 'model', 'variant', 'type', 'stock', 'homeline', 'address'];
+            if (array_diff($expectedHeaders, $headers)) {
                 $this->error('Invalid file format. Required columns: ' . implode(', ', $expectedHeaders));
                 return;
             }
 
-            array_shift($rows); // Remove header row
+            $partNumbersFromFile = array_column($rows, array_search('part_number', $headers));
             
-            foreach ($rows as $index => $row) {
+            $existingParts = MasterChildpart::whereIn('part_number', $partNumbersFromFile)
+                ->pluck('part_number')
+                ->flip();
+
+            $toCreate = [];
+            $toUpdate = [];
+
+            foreach ($rows as $row) {
                 $rowData = array_combine($headers, $row);
-                $rowData = array_map('trim', $rowData);
-                
+
                 if (empty($rowData['part_number']) || empty($rowData['part_name'])) {
-                    $this->errors[] = "Row " . ($index + 2) . ": Missing required fields";
                     continue;
                 }
 
-                try {
-                    $existing = MasterChildpart::where('part_number', $rowData['part_number'])->first();
-                    
-                    $data = [
-                        'part_number' => $rowData['part_number'],
-                        'part_name'   => $rowData['part_name'],
-                        'model'       => $rowData['model'] ?? null,
-                        'variant'     => $rowData['variant'] ?? null,
-                        'homeline'    => $rowData['homeline'] ?? null,
-                        'address'     => $rowData['address'] ?? null,
-                    ];
+                $data = [
+                    'part_number' => $rowData['part_number'],
+                    'part_name'   => $rowData['part_name'],
+                    'model'       => $rowData['model'] ?? null,
+                    'variant'     => $rowData['variant'] ?? null,
+                    'type'        => $rowData['type'] ?? null,
+                    'homeline'    => $rowData['homeline'] ?? null,
+                    'address'     => $rowData['address'] ?? null,
+                ];
 
-                    if ($existing) {
-                        $existing->update($data);
-                        $this->updatedCount++;
-                    } else {
-                        MasterChildpart::create($data);
-                        $this->createdCount++;
-                    }
-                } catch (\Exception $e) {
-                    $this->errors[] = "Row " . ($index + 2) . ": " . $e->getMessage();
+                if (isset($existingParts[$rowData['part_number']])) {
+                    $toUpdate[] = $data;
+                } else {
+                    $data['stock'] = $rowData['stock'] ?? 0;
+                    $toCreate[] = $data;
                 }
             }
 
+            DB::transaction(function () use ($toCreate, $toUpdate) {
+                if (!empty($toCreate)) {
+                    MasterChildpart::insert($toCreate);
+                    $this->createdCount = count($toCreate);
+                }
+
+                if (!empty($toUpdate)) {
+                    foreach ($toUpdate as $partData) {
+                        MasterChildpart::where('part_number', $partData['part_number'])->update($partData);
+                    }
+                    $this->updatedCount = count($toUpdate);
+                }
+            });
+
+            $this->success("Import complete. Created: {$this->createdCount}, Updated: {$this->updatedCount}.");
             $this->importStep = 'summary';
-            
+
         } catch (\Exception $e) {
             $this->error("Error processing file: " . $e->getMessage());
         }
@@ -218,7 +253,7 @@ class extends Component {
 
     public function resetFilters(): void
     {
-        $this->reset('filter_part_number', 'filter_model', 'filter_variant');
+        $this->reset('filter_part_number', 'filter_model', 'filter_variant', 'filter_type', 'filter_homeline');
     }
 };
 ?>
@@ -228,7 +263,7 @@ class extends Component {
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <x-stat 
             title="Total Parts" 
-            value="{{ $data->count() }}" 
+            value="{{ $this->stats['total'] }}" 
             icon="o-cube" 
             tooltip="Total Child-Parts" 
             color="text-primary" 
@@ -236,7 +271,7 @@ class extends Component {
         
         <x-stat 
             title="Unique Models" 
-            value="{{ $data->pluck('model')->unique()->count() }}" 
+            value="{{ $this->stats['models'] }}" 
             icon="o-tag" 
             description="Distinct models" 
             class="text-blue-500" 
@@ -244,7 +279,7 @@ class extends Component {
         
         <x-stat 
             title="Unique Variants" 
-            value="{{ $data->pluck('variant')->unique()->count() }}" 
+            value="{{ $this->stats['variants'] }}" 
             icon="o-variable" 
             description="Distinct variants" 
             class="text-green-500" 
@@ -252,7 +287,7 @@ class extends Component {
         
         <x-stat 
             title="Unique Homelines" 
-            value="{{ $data->pluck('homeline')->unique()->count() }}" 
+            value="{{ $this->stats['homelines'] }}" 
             icon="o-home" 
             description="Distinct homelines" 
             class="text-orange-500" 
@@ -287,7 +322,7 @@ class extends Component {
     </x-header>
 
     <!-- Filter Card -->
-    <x-card shadow class="mb-4">
+    <x-card shadow class="mb-4" separator progress-indicator>
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold">Filters</h3>
             <x-button 
@@ -353,82 +388,75 @@ class extends Component {
         </div>
     </x-card>
 
-    <!-- Create/Edit Drawer -->
-    <x-drawer
-        wire:model="modal"
-        title="{{ $edit_id ? 'Edit' : 'Create' }} Child-Part"
-        subtitle="Child-Part Management"
-        separator
-        with-close-button
-        close-on-escape
-        class="w-11/12 lg:w-1/3"
-    >
+    <!-- Create/Edit Modal -->
+    <x-modal progress-indicator wire:model="modal" title="{{ $edit_id ? 'Edit' : 'Create' }} Child-Part" subtitle="Child-Part Management" separator>
         <x-form wire:submit="save" class="space-y-4">
             <x-input 
                 label="Part #"   
                 wire:model="part_number" 
                 placeholder="e.g. 123-ABC"
                 required
-                class="w-full"
             />
             <x-input 
                 label="Name"     
                 wire:model="part_name"   
                 placeholder="e.g. Housing Top"
                 required
-                class="w-full"
             />
             <x-input 
                 label="Model"    
                 wire:model="model"       
                 placeholder="e.g. X200"
-                class="w-full"
             />
             <x-input 
                 label="Variant"  
                 wire:model="variant"     
                 placeholder="e.g. EU"
-                class="w-full"
+            />
+            <x-input 
+                label="Type"  
+                wire:model="type"     
+                placeholder="e.g. Component"
             />
             <x-input 
                 label="Homeline" 
                 wire:model="homeline"    
                 placeholder="e.g. A1"
-                class="w-full"
             />
             <x-textarea 
                 label="Address" 
                 wire:model="address" 
                 rows="2" 
                 placeholder="Optional location / address"
-                class="w-full"
             />
+            
             <x-slot:actions>
                 <x-button 
                     label="Cancel" 
                     @click="$wire.modal = false" 
-                    class="btn-ghost hover:bg-gray-100" 
+                    class="btn-ghost" 
                 />
                 <x-button 
                     label="Save" 
                     type="submit" 
                     icon="o-check" 
-                    class="btn-primary hover:scale-105 transition-transform" 
+                    class="btn-primary" 
                     spinner="save" 
                 />
             </x-slot:actions>
         </x-form>
-    </x-drawer>
+    </x-modal>
 
     <!-- Import Drawer -->
-    <x-drawer
+    <x-modal
         wire:model="importModal"
         title="Import Child-Parts"
         subtitle="{{ $importStep === 'summary' ? 'Summary' : 'Upload File' }}"
         separator
         with-close-button
         close-on-escape
-        class="w-11/12 lg:w-1/3"
+        progress-indicator
+        class="backdrop-blur"
     >
         @if($importStep === 'upload')
             <x-form wire:submit="importExcel" class="space-y-4">
@@ -437,7 +465,12 @@ class extends Component {
                     label="Excel File" 
                     hint="Only .xlsx files" 
                     accept=".xlsx" 
+                    hideProgress
                 />
+                <div wire:loading wire:target="file" class="text-sm text-gray-500 flex items-center gap-2">
+                    <x-loading class="loading-dots" />
+                    <span>Mengunggah file...</span>
+                </div>
                 <x-slot:actions>
                     <x-button 
                         label="Cancel" 
@@ -489,5 +522,5 @@ class extends Component {
                 </div>
             </div>
         @endif
-    </x-drawer>
+    </x-modal>
 </div>

@@ -6,6 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\App;
 use Livewire\Volt\Volt;
 use Illuminate\Support\ServiceProvider;
+use App\Services\ChatService;
 
 class VoltServiceProvider extends ServiceProvider
 {
@@ -14,7 +15,7 @@ class VoltServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+
     }
 
     /**

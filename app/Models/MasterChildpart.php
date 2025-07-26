@@ -60,10 +60,14 @@ class MasterChildpart extends Model
         );
     }
 
-    /* ---------------- Accessors ---------------- */
+    public function scopeWithTotalIssued(Builder $query): Builder
+    {
+        return $query->withSum('issuances as total_issued_quantity', 'issued_quantity');
+    }
 
     public function getTotalIssuedQuantityAttribute(): int|float
     {
-        return $this->issuances()->sum('issued_quantity');
+        // Gunakan nilai yang sudah di-load, jika tidak ada, baru hitung (fallback)
+        return $this->total_issued_quantity ?? $this->issuances()->sum('issued_quantity');
     }
 }

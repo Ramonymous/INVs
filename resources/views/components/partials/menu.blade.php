@@ -9,5 +9,5 @@
     <x-menu-item title="List Request" icon="o-list-bullet" link="{{ route('inventory.list-requests') }}" route="inventory.list-requests"/>
     <x-menu-item title="Request" icon="o-list-bullet" link="{{ route('inventory.requests') }}" route="inventory.requests"/>
     <x-menu-item title="Receiving" icon="o-plus-circle" link="{{ route('inventory.receivings') }}" route="inventory.receivings"/>
-    <x-menu-item title="Supply" icon="o-minus-circle" link="###"/>
+    <x-menu-item title="Supply" icon="o-minus-circle" link="{{ route('inventory.outgoing') }}" route="inventory.outgoing"/>
 </x-menu-sub>

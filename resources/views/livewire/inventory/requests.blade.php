@@ -73,13 +73,12 @@ class extends Component
     {
         $this->partsSearchable = MasterChildpart::query()
             ->where('part_number', 'like', "%$query%")
+            // Hanya pilih kolom yang dibutuhkan
+            ->select('id', 'part_number as name')
             ->take(10)
-            ->orderBy('part_number')
+            ->orderBy('name') // Order by alias 'name'
             ->get()
-            ->map(fn($part) => [
-                'id' => $part->id,
-                'name' => $part->part_number // `x-choices` uses 'name' for the label by default
-            ])->toArray();
+            ->toArray();
     }
 
     /**
@@ -162,8 +161,6 @@ class extends Component
                     'request_id' => $request->id,
                     'child_part_id' => $item['child_part_id'],
                     'quantity' => $item['quantity'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
                 ])->toArray();
 
                 InvRequestItem::insert($itemsToInsert);
@@ -591,14 +588,6 @@ class extends Component
 </div>
 
 @push('footer')
-<!-- 
-    IMPORTANT: Since you installed jsqr via npm, you should
-    import it in your main javascript file (e.g., resources/js/app.js)
-    like this:
-    
-    import jsQR from 'jsqr';
-    window.jsQR = jsQR;
--->
 <script>
     function scanner() {
         return {

@@ -57,11 +57,6 @@ class InvRequest extends Model
         return $this->total_requested_qty ?? $this->items->sum('quantity');
     }
 
-    public function getTotalIssuedQtyAttribute(): int|float
-    {
-        return $this->total_issued_qty ?? $this->issuances()->sum('issued_quantity');
-    }
-
     public function getIssuanceStatusAttribute(): string
     {
         $requested = $this->total_requested_qty;
@@ -84,24 +79,18 @@ class InvRequest extends Model
 
     public function scopeWhereStatus(Builder $query, string $status): Builder
     {
-        return $query->withStatus()->where(function ($q) use ($status) {
-            switch ($status) {
-                case 'pending':
-                    $q->where(function ($subQuery) {
-                        $subQuery->whereDoesntHave('issuances')
-                                 ->orWhereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) <= 0');
-                    });
-                    break;
-                case 'fully issued':
-                    $q->whereHas('issuances')
-                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) >= (select sum(quantity) from inv_request_items where inv_request_items.request_id = inv_requests.id and inv_request_items.deleted_at is null)');
-                    break;
-                case 'partially issued':
-                    $q->whereHas('issuances')
-                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) > 0')
-                      ->whereRaw('(select sum(issued_quantity) from inv_issuances where inv_issuances.request_id = inv_requests.id and inv_issuances.deleted_at is null) < (select sum(quantity) from inv_request_items where inv_request_items.request_id = inv_requests.id and inv_request_items.deleted_at is null)');
-                    break;
-            }
-        });
+        // Pastikan kolom alias tidak bentrok jika ada join lain
+        $requestedQtyAlias = 'total_requested_qty';
+        $issuedQtyAlias = 'total_issued_qty';
+
+        return $query
+            ->withSum('items as ' . $requestedQtyAlias, 'quantity')
+            ->withSum('issuances as ' . $issuedQtyAlias, 'issued_quantity')
+            ->having(match ($status) {
+                'pending' => "COALESCE({$issuedQtyAlias}, 0) <= 0",
+                'fully issued' => "COALESCE({$issuedQtyAlias}, 0) >= {$requestedQtyAlias}",
+                'partially issued' => "COALESCE({$issuedQtyAlias}, 0) > 0 AND COALESCE({$issuedQtyAlias}, 0) < {$requestedQtyAlias}",
+                default => fn ($q) => $q, // Tidak melakukan apa-apa jika status tidak valid
+            });
     }
 }

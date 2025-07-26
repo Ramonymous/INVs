@@ -6,7 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
@@ -25,7 +25,7 @@ class InvRequestItem extends Model
     protected $fillable = ['request_id', 'child_part_id', 'quantity', 'fulfilled'];
 
     /** @var array<string,string> */
-    protected $casts = ['fulfilled' => 'boolean'];
+    protected $casts = ['fulfilled' => 'boolean', 'created_at' => 'timestamp', 'updated_at' => 'timestamp'];
 
     /* ---------------- Relations ---------------- */
 
@@ -39,15 +39,8 @@ class InvRequestItem extends Model
         return $this->belongsTo(MasterChildpart::class, 'child_part_id');
     }
 
-    public function issuances(): HasManyThrough
+    public function issuances(): HasMany
     {
-        return $this->hasManyThrough(
-            InvIssuance::class,
-            InvReceiptItem::class,
-            'child_part_id',
-            'receipt_item_id',
-            'child_part_id',
-            'id'
-        )->where('request_id', $this->request_id);
+        return $this->hasMany(InvIssuance::class, 'request_item_id');
     }
 }

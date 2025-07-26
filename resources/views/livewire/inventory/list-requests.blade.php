@@ -1,12 +1,14 @@
 <?php
 
-use Livewire\Volt\Component;
-use App\Models\InvRequestItem;
 use App\Models\InvRequest;
+use App\Models\InvRequestItem;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use Carbon\Carbon;
+use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
+use Livewire\Attributes\Title;
+use Livewire\Volt\Component;
 
 new
 #[Layout('components.layouts.app')]
@@ -17,110 +19,98 @@ class extends Component {
     public Collection $rows;
     public array $seenReqIds = [];
     public array $announcedDelayedItemIds = []; // Track items announced for delay
-    public array $sortBy = ['column' => 'requested_at', 'direction' => 'asc'];
 
     /**
      * Mount the component and load the initial data.
      */
     public function mount(): void
     {
-        // We purposely do NOT pre-fill seen arrays so that
-        // the very first poll speaks every existing item.
         $this->rows = collect();
         $this->refreshRows();
     }
 
     /**
-     * Called every 5s by wire:poll.
-     * Detects new items and items that have been waiting for over 30 minutes.
+     * Called every 5s by wire:poll or manually via an event.
+     * This method is optimized to use a cleaner query and a single processing loop.
      */
+    #[On('refreshRows')]
     public function refreshRows(): void
     {
         try {
-            // Fetch the latest request items, ensuring we sort by the request date
+            // OPTIMASI 1: Query dibuat lebih "Eloquent" tanpa manual JOIN.
             $freshItems = InvRequestItem::query()
-                ->with(['part', 'request.user'])
+                ->with(['part', 'request.user']) // Eager loading (sudah baik)
                 ->where('fulfilled', false)
-                ->whereHas('part')
-                ->whereHas('request')
-                ->join('inv_requests', 'inv_request_items.request_id', '=', 'inv_requests.id')
-                ->orderBy('inv_requests.requested_at', 'asc') // Sort by request time ascending
+                ->whereHas('request') // Memastikan request ada
+                ->orderBy(
+                    InvRequest::select('requested_at')
+                        ->whereColumn('inv_requests.id', 'inv_request_items.request_id')
+                , 'asc')
                 ->limit(50)
                 ->get();
 
-            // --- 1.  Detect completely new requests for immediate announcement ---
-            $newRequestIds = $freshItems
-                ->pluck('request_id')
-                ->unique()
-                ->filter(fn ($id) => !in_array($id, $this->seenReqIds))
-                ->values()
-                ->toArray();
+            // OPTIMASI 2: Logika diproses dalam satu perulangan untuk kejelasan dan efisiensi.
+            $newlySeenRequestIds = $freshItems->pluck('request_id')->unique()->diff($this->seenReqIds)->values()->all();
+            $thirtyMinutesAgo = now()->subMinutes(30);
 
-            // --- 2.  Collect part numbers from NEW requests for immediate speech ---
-            $partNumbersToSpeakImmediately = $freshItems
-                ->filter(fn ($item) => in_array($item->request_id, $newRequestIds))
-                ->pluck('part.part_number')
-                ->toArray();
+            $partNumbersToSpeakImmediately = [];
+            $partNumbersToSpeakDelayed = [];
+            $rowsForTable = [];
 
-            // --- 3. Detect DELAYED items (older than 30 mins, not in a new request, and not yet announced) ---
-            $thirtyMinutesAgo = Carbon::now()->subMinutes(30);
-            $partNumbersToSpeakDelayed = $freshItems
-                ->filter(function ($item) use ($newRequestIds, $thirtyMinutesAgo) {
-                    // Condition 1: Not part of a brand new request
-                    return !in_array($item->request_id, $newRequestIds)
-                        // Condition 2: Requested more than 30 minutes ago
-                        && $item->request->requested_at->lt($thirtyMinutesAgo)
-                        // Condition 3: Not already announced as delayed
-                        && !in_array($item->id, $this->announcedDelayedItemIds);
-                })
-                ->map(function ($item) {
-                    // Mark as announced to prevent re-announcing on the next poll
-                    $this->announcedDelayedItemIds[] = $item->id;
-                    return $item->part->part_number;
-                })
-                ->values()
-                ->toArray();
+            foreach ($freshItems as $item) {
+                // Lewati jika relasi part tidak ada (pengaman)
+                if (!$item->part || !$item->request) {
+                    continue;
+                }
 
-            // --- 4. Mark new requests as seen ---
-            if (!empty($newRequestIds)) {
-                $this->seenReqIds = array_unique(array_merge($this->seenReqIds, $newRequestIds));
+                $isNewRequest = in_array($item->request_id, $newlySeenRequestIds);
+
+                // --- Logika untuk pengumuman suara ---
+                if ($isNewRequest) {
+                    $partNumbersToSpeakImmediately[] = $item->part->part_number;
+                }
+                // Cek item yang tertunda
+                elseif ($item->request->requested_at->lt($thirtyMinutesAgo) && !in_array($item->id, $this->announcedDelayedItemIds)) {
+                    $partNumbersToSpeakDelayed[] = $item->part->part_number;
+                    $this->announcedDelayedItemIds[] = $item->id; // Tandai agar tidak diumumkan lagi
+                }
+
+                // --- Membangun baris untuk tabel ---
+                $rowsForTable[] = [
+                    'item_id'          => $item->id,
+                    'request_id'       => $item->request_id,
+                    'part_number'      => $item->part->part_number,
+                    'requested_at'     => $item->request->requested_at->diffForHumans(),
+                    'destination'      => $item->request->destination,
+                    'request_quantity' => $item->quantity,
+                    'request_uom'      => 'KBN',
+                    'status'           => $item->fulfilled ? 'close' : 'waiting',
+                    'is_new'           => $isNewRequest,
+                ];
             }
 
-            // --- 5. Dispatch speech events ---
-            if ($partNumbersToSpeakImmediately) {
-                $this->dispatch('speak-part-numbers', part_numbers: $partNumbersToSpeakImmediately);
-            }
-            if ($partNumbersToSpeakDelayed) {
-                $this->dispatch('speak-delayed-part-numbers', part_numbers: $partNumbersToSpeakDelayed);
+            // --- Update ID yang sudah terlihat ---
+            if (!empty($newlySeenRequestIds)) {
+                $this->seenReqIds = array_unique(array_merge($this->seenReqIds, $newlySeenRequestIds));
             }
 
-            // --- 7.  Build rows for the table ---
-            $this->rows = $freshItems->map(fn ($item) => [
-                'item_id'          => $item->id,
-                'request_id'       => $item->request_id,
-                'part_number'      => $item->part->part_number,
-                'requested_at'     => $item->request->requested_at->diffForHumans(), // Format for humans
-                'destination'      => $item->request->destination,                      // Add destination
-                'request_quantity' => $item->quantity,
-                'request_uom'      => 'KBN',
-                'status'           => $item->fulfilled ? 'close' : 'waiting',
-                'is_new'           => in_array($item->request_id, $newRequestIds), // highlight entire request
-            ]);
+            // --- Kirim event ke frontend (hanya jika ada data baru) ---
+            if (!empty($partNumbersToSpeakImmediately)) {
+                $this->dispatch('speak-part-numbers', part_numbers: array_unique($partNumbersToSpeakImmediately));
+            }
+            if (!empty($partNumbersToSpeakDelayed)) {
+                $this->dispatch('speak-delayed-part-numbers', part_numbers: array_unique($partNumbersToSpeakDelayed));
+            }
+
+            // --- Update data tabel di properti komponen ---
+            $this->rows = collect($rowsForTable);
+
         } catch (\Throwable $e) {
             Log::error('refreshRows() error', ['error' => $e->getMessage()]);
         }
     }
-
-    /**
-     * Allow manual refresh via a dispatched event.
-     */
-    public function getListeners(): array
-    {
-        return [
-            'refreshRows' => 'refreshRows',
-        ];
-    }
-}; ?>
+};
+?>
 
 <div wire:poll.5s="refreshRows">
     <x-header title="Real-time Part Requests" separator progress-indicator>

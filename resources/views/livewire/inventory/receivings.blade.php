@@ -63,24 +63,24 @@ class extends Component {
     public function search(string $query = ''): void
     {
         $cacheKey = 'parts_search_' . md5($query);
+
         $results = cache()->remember($cacheKey, 3600, function () use ($query) {
-            $selected = $this->child_part_id
-                ? MasterChildpart::where('id', $this->child_part_id)->get()
-                : collect();
-            return MasterChildpart::query()
+            $queryBuilder = MasterChildpart::query()
+                ->select('id', 'part_number')
                 ->where('part_number', 'like', "%$query%")
                 ->take(10)
-                ->orderBy('part_number')
-                ->get()
-                ->merge($selected);
+                ->orderBy('part_number');
+
+            if ($this->child_part_id) {
+                $queryBuilder->orWhere('id', $this->child_part_id);
+            }
+
+            return $queryBuilder->get();
         });
 
-        $this->partsSearchable = $results->map(fn ($p) => [
-            'id' => $p->id,
-            'part_number' => $p->part_number
-        ])->toArray();
+        $this->partsSearchable = $results->toArray();
     }
-    
+
     /* ---------- LIFECYCLE ---------- */
     public function mount(): void
     {
@@ -157,44 +157,27 @@ class extends Component {
     public function submit(): void
     {
         try {
-            $this->validateSubmission();
-            $receipt = DB::transaction(function () {
-                $rcpt = InvReceipt::create([
-                    'receipt_number' => $this->generateReceiptNumber(),
-                    'received_at' => Carbon::parse($this->received_at),
-                    'received_by' => Auth::id(),
-                ]);
+            if (empty($this->items)) {
+                throw new \Exception('Minimal 1 item harus ditambahkan.');
+            }
+            $this->validate(['received_at' => 'required|date']);
 
-                $itemsToInsert = collect($this->items)->map(function ($item, $i) use ($rcpt) {
-                    return [
-                        'receipt_id' => $rcpt->id,
-                        'child_part_id' => $item['child_part_id'],
-                        'quantity' => $item['quantity'],
-                        'available' => $item['quantity'],
-                        'code' => $this->generateItemCode($rcpt->id, $i),
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                })->toArray();
+            $receiptData = [
+                'received_at' => Carbon::parse($this->received_at),
+                'received_by' => Auth::id(),
+                'receipt_number' => 'TEMP',
+            ];
 
-                InvReceiptItem::insert($itemsToInsert);
-
-                foreach ($this->items as $item) {
-                    MasterChildpart::where('id', $item['child_part_id'])->increment('stock', $item['quantity']);
-                }
-
-                $this->freshItemIds = InvReceiptItem::where('receipt_id', $rcpt->id)
-                    ->pluck('id')
-                    ->toArray();
-
-                return $rcpt;
-            });
+            $receipt = InvReceipt::createWithItems($receiptData, $this->items);
+            
+            $this->freshItemIds = $receipt->items->pluck('id')->toArray();
 
             $this->reset('items');
             $this->success('Penerimaan berhasil disimpan.');
             $this->askPrint = true;
+
         } catch (\Exception $e) {
-            $this->error($e->getMessage());
+            $this->error('Gagal menyimpan: ' . $e->getMessage());
         }
     }
 
